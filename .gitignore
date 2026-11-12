@@ -1,0 +1,7 @@
+# Saidas de testes e medicoes.
+/resultados/
+
+# Executaveis e objetos de compilacao.
+/sequencial
+/codigos/sequencial
+*.o
