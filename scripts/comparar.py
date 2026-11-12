@@ -2,6 +2,10 @@
 """Compara sequencial e OpenMP em potencias de dois ate o limite disponivel."""
 import argparse
 import csv
+import hashlib
+import json
+import platform
+import shlex
 from datetime import datetime
 import os
 from pathlib import Path
@@ -60,8 +64,15 @@ def main():
     dados = args.dados.resolve()
     if not dados.is_file():
         parser.error(f'arquivo nao encontrado: {dados}')
-    subprocess.run(['make', '-C', str(raiz / 'codigos'), 'all'], check=True)
+    subprocess.run(['make', '-C', str(raiz / 'codigos'), '-B', 'all'], check=True)
 
+    fontes = {}
+    for fonte in sorted((raiz / 'codigos').iterdir()):
+        if fonte.suffix in ('.cpp', '.hpp') or fonte.name == 'Makefile':
+            fontes[str(fonte.relative_to(raiz))] = fonte.read_bytes()
+    hashes_binarios = {nome: hashlib.sha256((raiz / local).read_bytes()).hexdigest()
+                       for nome, local in [('sequencial', 'codigos/sequencial'),
+                                           ('paralelizado', 'resultados/paralelizado')]}
     variantes = [('sequencial', 1)] + [('paralelizado', t) for t in configuracoes(maximo)]
     print('Threads disponiveis:', disponivel)
     print('Configuracoes: sequencial; OpenMP com', ', '.join(str(t) for _, t in variantes[1:]))
@@ -74,6 +85,7 @@ def main():
     if len(referencia) != 6:
         raise RuntimeError('Saida sequencial incompleta.')
     medicoes = []
+    estatisticas_medidas = []
     gerador = random.Random(42)
     for repeticao in range(args.repeticoes):
         ordem = variantes.copy()
@@ -96,6 +108,9 @@ def main():
                     raise RuntimeError(f'Metrica ausente: {padrao}')
                 tempos.append(float(valor[1]))
             medicoes.append([repeticao + 1, programa, threads, usadas, *tempos])
+            numeros = [float(re.search(r': ([0-9.]+)', linha)[1])
+                       for linha in re.findall(padrao_resultado, saida, re.M)]
+            estatisticas_medidas.append([repeticao + 1, programa, threads, usadas, *numeros])
 
     pasta = raiz / 'resultados'
     pasta.mkdir(exist_ok=True)
@@ -105,6 +120,53 @@ def main():
         tabela = csv.writer(arquivo)
         tabela.writerow(['repeticao', 'versao', 'threads_pedidas', 'threads_usadas', 'leitura_s', 'calculos_s', 'total_s'])
         tabela.writerows(medicoes)
+    # Registra os resultados estatisticos da MESMA coleta, sem inferir CV depois.
+    estatisticas_csv = caminho.with_name(caminho.stem + '_estatisticas.csv')
+    with estatisticas_csv.open('w', newline='') as arquivo:
+        tabela = csv.writer(arquivo)
+        tabela.writerow(['repeticao', 'versao', 'threads_pedidas', 'threads_usadas',
+                         'media_estatura_cm', 'desvio_estatura_cm', 'cv_estatura_pct',
+                         'media_peso_kg', 'desvio_peso_kg', 'cv_peso_pct'])
+        tabela.writerows(estatisticas_medidas)
+    fontes_registradas = {}
+    for nome, conteudo in fontes.items():
+        snapshot = caminho.parent / (caminho.stem + '_fontes') / nome
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_bytes(conteudo)
+        fontes_registradas[nome] = {'sha256': hashlib.sha256(conteudo).hexdigest(),
+                                   'snapshot': str(snapshot.relative_to(caminho.parent))}
+    comando_compilador = shlex.split(os.environ.get('CXX', 'g++'))
+    compilador = subprocess.run([*comando_compilador, '--version'], text=True,
+                               capture_output=True, check=True).stdout.splitlines()[0]
+    cpus = ''
+    info_cpu = Path('/proc/cpuinfo')
+    if info_cpu.exists():
+        for linha in info_cpu.read_text().splitlines():
+            if linha.startswith('model name'):
+                cpus = linha.split(':', 1)[1].strip()
+                break
+    metadados = {
+        'schema': 1, 'data_coleta': datetime.now().astimezone().isoformat(),
+        'entrada': {'arquivo': str(dados), 'sha256': hashlib.sha256(dados.read_bytes()).hexdigest(),
+                    'pessoas': int(re.search(r'de (\d+) pessoas', saida_base)[1])},
+        'ambiente': {'sistema': platform.platform(), 'arquitetura': platform.machine(),
+                     'modelo_cpu': cpus, 'processadores_disponiveis': disponivel,
+                     'python': platform.python_version(), 'compilador': compilador,
+                     'CXXFLAGS': os.environ.get('CXXFLAGS', 'nao informado; consultar Makefile do snapshot'),
+                     'OMP_DYNAMIC': 'FALSE'},
+        'metodo': {'repeticoes': args.repeticoes, 'threads': configuracoes(maximo),
+                   'processos_novos': True, 'ordem_embaralhada_seed': 42,
+                   'tabelas_e_ids': False, 'clock': 'CLOCK_MONOTONIC',
+                   'casas_decimais_tempos': 6, 'casas_decimais_estatisticas': 2,
+                   'validacao': 'seis estatisticas exibidas; nao toda a precisao interna'},
+        'tempos': {'arquivo': caminho.name, 'sha256': hashlib.sha256(caminho.read_bytes()).hexdigest()},
+        'estatisticas': {'arquivo': estatisticas_csv.name,
+                         'sha256': hashlib.sha256(estatisticas_csv.read_bytes()).hexdigest()},
+        'fontes': fontes_registradas, 'sha256_executaveis': hashes_binarios}
+    metadados_json = caminho.with_name(caminho.stem + '_metadados.json')
+    metadados_json.write_text(json.dumps(metadados, ensure_ascii=False, indent=2) + '\n')
+    print(f'Estatisticas: {estatisticas_csv}\nMetadados: {metadados_json}')
+
     base = statistics.median(m[5] for m in medicoes if m[1] == 'sequencial')
     linhas = [f'Dados: {dados}', f'Threads disponiveis: {disponivel}',
               f'Repeticoes por configuracao: {args.repeticoes}',

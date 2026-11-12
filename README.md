@@ -26,6 +26,96 @@ make -C codigos run-paralelizado FORCAR_PARALELO=0
 
 Se já estiver dentro de `codigos`, retire `-C codigos` dos comandos.
 
+## Executar com Docker
+
+O Docker instala GCC, Make e Python 3 em Ubuntu 24.04. Os executáveis são
+compilados dentro do container com o mesmo `-O3` das duas versões. Não é
+necessário instalar as ferramentas de C++ diretamente no computador.
+
+Execute os comandos seguintes na **pasta principal**:
+
+```bash
+cd ~/Downloads/Desafio-OpenMP
+
+# Construir a imagem com as permissoes do seu usuario Linux:
+docker build --build-arg USER_UID="$(id -u)" --build-arg USER_GID="$(id -g)" -t desafio-openmp .
+
+# Preparar a pasta em que os resultados serao salvos:
+mkdir -p resultados
+```
+
+### Comparação completa
+
+```bash
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados desafio-openmp
+```
+
+Sem comando adicional, compara o sequencial e OpenMP com 1, 2, 4, 8, 16… até
+o máximo detectado dentro do container, com 30 repetições por configuração.
+Mostra o resumo no terminal e salva CSV/TXT na pasta `resultados` do computador.
+
+Para mudar as repetições ou limitar o máximo:
+
+```bash
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp python3 scripts/comparar.py --repeticoes 40 --max-threads 8
+```
+
+Remova `--max-threads 8` para testar até o máximo disponível. A montagem mantém
+os resultados no computador mesmo após o container ser removido por `--rm`.
+
+### Execuções individuais
+
+```bash
+# Sequencial, salvando um TXT:
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp bash scripts/sequencial.sh
+
+# Paralelo com 4 threads, salvando um TXT:
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp bash scripts/paralelizado.sh dados_exemplo.txt 4
+
+# Paralelo sem tabelas ou IDs, mostrando apenas resumo e metricas:
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp make -C codigos run-paralelizado THREADS=4 TABELA=0 MOSTRAR_THREADS=0
+```
+
+### Usar seus dados
+
+Coloque `dados.txt` na pasta principal e monte o arquivo adicionalmente:
+
+```bash
+docker run --rm \
+  --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  --mount type=bind,src="$(pwd)/dados.txt",dst=/lab/dados.txt,readonly \
+  desafio-openmp python3 scripts/comparar.py dados.txt --repeticoes 40
+```
+
+O arquivo precisa existir e obedecer ao formato de 1.000 pessoas descrito abaixo.
+Para abrir um terminal dentro do ambiente:
+
+```bash
+docker run --rm -it --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados desafio-openmp bash
+```
+
+Dentro dele, a pasta principal é `/lab`. Você pode executar `make -C codigos
+run-sequencial` ou `make -C codigos run-paralelizado THREADS=4`.
+
+A cada início o ambiente recompila antes de executar o comando escolhido. Isso
+recria `resultados/paralelizado` mesmo quando a montagem oculta o executável da
+imagem e evita reutilizar binários do computador. A compilação fica fora dos
+tempos medidos. O código vem da imagem: após alterar fontes, scripts ou dados de
+exemplo, repita o `docker build`.
+
+Se o Docker exibir erro de acesso a `/var/run/docker.sock`, use `sudo docker`
+no lugar de `docker`, mantendo `USER_UID` e `USER_GID` com os valores do seu
+usuário. Se o Docker não estiver ativo, inicie o serviço antes de executar.
+O número de threads disponível depende dos processadores visíveis no container
+ou na máquina virtual do Docker; use esse mesmo ambiente para comparar as versões.
+
+Referências: [execução de containers](https://docs.docker.com/engine/containers/run/)
+e [montagem de pastas](https://docs.docker.com/engine/storage/bind-mounts/).
+
 ## Entrada de dados
 
 Cada linha deve conter estatura em cm e peso em kg, separados por espaço ou
@@ -168,6 +258,153 @@ O script não mede apenas uma equipe já aquecida. Com apenas 1.000 pessoas,
 o custo do OpenMP pode superar o ganho, mesmo usando mais threads. Compare as
 medianas dos cálculos; não atribua diferenças isoladas da leitura ao OpenMP.
 
+## Gráficos para o futuro relatório PDF
+
+Os scripts `scripts/dados_relatorio.py` e `scripts/gerar_graficos.py` analisam
+uma coleta de cada vez. Não misturam CSVs de algoritmos, máquinas ou execuções
+diferentes. Geram figuras estáticas em **PNG com 300 dpi** e **SVG vetorial**,
+adequadas para inserir em um relatório. Ainda não geram o PDF final.
+
+### Usar Docker (Matplotlib já incluído)
+
+Reconstrua a imagem para incluir os scripts e a dependência nova:
+
+```bash
+docker build --build-arg USER_UID="$(id -u)" --build-arg USER_GID="$(id -g)" -t desafio-openmp .
+```
+
+Para coletar novas medições e depois gerar todos os gráficos, na pasta principal:
+
+```bash
+mkdir -p resultados
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp bash -c 'python3 scripts/comparar.py --repeticoes 40 && python3 scripts/gerar_graficos.py'
+```
+
+Para apenas gerar os gráficos da coleta mais recente, sem medir novamente:
+
+```bash
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp python3 scripts/gerar_graficos.py
+```
+
+Para selecionar uma coleta específica, substitua o nome no exemplo:
+
+```bash
+docker run --rm --mount type=bind,src="$(pwd)/resultados",dst=/lab/resultados \
+  desafio-openmp python3 scripts/gerar_graficos.py resultados/comparacao_NOME.csv
+```
+
+A inicialização do container recompila antes do comando, mas o gerador de
+figuras não executa os programas nem substitui medições históricas. Ele usa os
+CSV e snapshots registrados na coleta selecionada.
+
+### Executar diretamente no Linux
+
+Instale as dependências em um ambiente Python separado:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-graficos.txt
+
+make -C codigos comparar REPETICOES=40
+make -C codigos graficos
+```
+
+Se o módulo `venv` não estiver instalado no seu sistema, use o Docker acima
+ou instale o pacote `python3-venv` da sua distribuição. Com o ambiente ativo,
+também é possível selecionar um CSV:
+
+```bash
+python scripts/gerar_graficos.py resultados/comparacao_NOME.csv
+# Equivalente pelo Makefile; CSV e relativo a codigos:
+make -C codigos graficos CSV=../resultados/comparacao_NOME.csv
+```
+
+### Figuras geradas e relação com os critérios da entrega
+
+| Arquivo | O que mostra | Uso no relatório |
+|---|---|---|
+| `01_tempo_calculos` | Medianas e intervalo P25–P75 dos cálculos | Comparar o algoritmo sequencial com OpenMP |
+| `02_tempo_total` | Medianas e intervalo P25–P75 do total | Mostrar o efeito sobre o programa completo |
+| `03_speedup` | Razão das medianas, referência 1 e ideal por threads | Identificar ganhos ou perdas reais |
+| `04_eficiencia` | Speedup dividido pelas threads, em porcentagem | Discutir escalabilidade e custo de coordenação |
+| `05_variacao_execucoes` | Boxplots com todas as medições e valores extremos | Mostrar estabilidade e variação entre testes |
+| `06_composicao_tempo` | Participação de leitura, cálculo e restante no tempo médio | Discutir onde o tempo é gasto |
+| `07_coeficientes_variacao` | CV de estatura e peso por configuração | Apresentar os resultados estatísticos obtidos |
+
+Cada nome possui um `.png` e um `.svg`. Os eixos indicam quando a escala é
+logarítmica: ela permite enxergar tanto o sequencial de poucos microssegundos
+quanto execuções paralelas muito mais lentas. As hastes dos gráficos de tempo
+são **quartis**, não intervalos de confiança. Nenhum tempo extremo é removido.
+A referência ideal de speedup é apenas uma comparação visual, não uma promessa.
+
+Os arquivos ficam em:
+
+```text
+resultados/graficos/comparacao_NOME/
+  01_tempo_calculos.png
+  01_tempo_calculos.svg
+  ...
+  07_coeficientes_variacao.png
+  07_coeficientes_variacao.svg
+  resumo_desempenho.csv
+  estatisticas_obtidas.csv
+  tempos_originais.csv
+  manifesto_graficos.json
+  guia_relatorio.md
+  fontes/codigos/...
+```
+
+`guia_relatorio.md` organiza os materiais nos quatro critérios solicitados:
+
+1. **Código-fonte completo:** snapshots dos `.cpp`, `.hpp` e Makefile usados na
+   coleta, preservados em `fontes/codigos/`.
+2. **Partes paralelizadas e justificativa:** descrição da equipe única, contagens
+   privadas, `omp for`, reduções, `single`, `nowait` e dependências entre fases.
+   Revise a descrição com os snapshots antes de finalizar o PDF.
+3. **Resultados obtidos:** tabela com médias, desvios e CVs e o gráfico dos CVs.
+4. **Análise de desempenho:** medianas, quartis, speedup, eficiência e legendas
+   para interpretar as figuras, inclusive quando o paralelo perde desempenho.
+
+O gráfico de composição usa **médias** dos componentes para que as parcelas
+somem o total médio. O restante é `total − leitura − cálculos`: inclui saída e
+outras operações, não é tempo medido exclusivamente da impressão nem de cada
+fase OpenMP. Speedup e eficiência usam **medianas dos cálculos**. Gráficos não
+substituem a análise e a explicação do código no texto do relatório.
+
+### Dados e rastreabilidade
+
+As novas comparações recompilam as duas versões com o mesmo compilador e
+registram, além do CSV de tempos e resumo TXT:
+
+- `comparacao_NOME_estatisticas.csv`: as seis estatísticas de cada execução.
+- `comparacao_NOME_metadados.json`: sistema, CPU, compilador, configuração,
+  método, tamanho e hash da entrada e hashes dos dados e fontes.
+- `comparacao_NOME_fontes/`: cópia dos fontes da coleta para a entrega futura.
+
+O gerador verifica os hashes e a correspondência entre repetições. Os CVs
+possuem a precisão exibida pelo programa (duas casas decimais); sua igualdade
+não prova igualdade em toda a precisão interna. Os tempos são arredondados a
+microssegundos. O gerador não transforma essas medições em precisão adicional.
+O exemplo fornecido continua sendo uma entrada de **dados fictícios**.
+
+CSVs antigos sem estatísticas/metadados ainda geram os seis gráficos de
+desempenho, com aviso. O gráfico dos CVs é omitido: o script não usa valores da
+entrada atual para preencher uma coleta antiga. Para obtê-lo, faça uma nova
+comparação. Uma coleta de teste com poucas repetições gera aviso; use 30 ou 40
+repetições para a análise, sem interpretar isso como garantia estatística.
+
+Para verificar as fórmulas e a validação dos dados:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Referências de exportação e gráficos: [Matplotlib — savefig](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.savefig.html)
+e [Matplotlib — boxplot](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.boxplot.html).
+
 ## O que foi otimizado
 
 ### Base sequencial
@@ -246,7 +483,10 @@ codigos/
 scripts/
   sequencial.sh             # Executar e salvar a saída sequencial
   paralelizado.sh           # Executar OpenMP e salvar a saida
-  comparar.py               # Comparar ate o maximo e salvar tempos e medianas
+  comparar.py               # Coletar tempos, estatisticas, ambiente e fontes
+  dados_relatorio.py        # Validar CSVs e calcular resumos
+  gerar_graficos.py         # Exportar PNG/SVG e materiais para o relatorio
+  docker-entrypoint.sh       # Preparar a execucao dentro do container
 resultados/                 # Executavel paralelizado e relatorios; ignorados pelo Git
 dados_exemplo.txt
 ```

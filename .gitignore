@@ -11,3 +11,6 @@
 # Cache dos scripts Python.
 __pycache__/
 *.py[cod]
+
+# Ambiente Python local para gerar graficos.
+.venv/

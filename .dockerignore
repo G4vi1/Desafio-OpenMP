@@ -1,0 +1,10 @@
+.git
+.vscode
+resultados
+codigos/sequencial
+codigos/paralelizado
+**/__pycache__
+**/*.pyc
+**/*.o
+
+.venv

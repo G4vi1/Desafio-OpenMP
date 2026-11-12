@@ -6,6 +6,8 @@ MOSTRAR_THREADS ?= 0
 FORCAR_PARALELO ?= 1
 TABELA ?= 1
 REPETICOES ?= 30
+CSV ?=
+OPCAO_CSV = $(if $(CSV),"$(CSV)",)
 MAX_THREADS ?=
 OPCAO_MAX = $(if $(MAX_THREADS),--max-threads "$(MAX_THREADS)",)
 
@@ -41,7 +43,13 @@ run-paralelizado: paralelizado validar-opcoes
 
 # Compara de verdade: OpenMP ativo, mesmos dados, mesma saida e sem tabelas.
 comparar: all validar-opcoes
-	python3 ../scripts/comparar.py "$(DADOS)" --repeticoes "$(REPETICOES)" $(OPCAO_MAX)
+	CXX="$(CXX)" CXXFLAGS="$(CXXFLAGS)" python3 ../scripts/comparar.py "$(DADOS)" --repeticoes "$(REPETICOES)" $(OPCAO_MAX)
 
 clean:
 	$(RM) sequencial ../resultados/paralelizado
+
+# Usa a ultima coleta por padrao; CSV=../resultados/comparacao_....csv seleciona outra.
+.PHONY: graficos
+
+graficos:
+	python3 ../scripts/gerar_graficos.py $(OPCAO_CSV)
