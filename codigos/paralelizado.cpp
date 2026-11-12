@@ -1,312 +1,122 @@
-/*
- * Desafio final: coeficiente de variacao para dados agrupados.
- * Versao paralelizada com OpenMP.
- *
- * Compilar: g++ -std=c++14 -O2 -Wall -Wextra -pedantic -fopenmp paralelizado.cpp -o paralelizado
- * Executar: ./paralelizado dados.txt
- * Entrada: exatamente 1000 linhas, cada uma com estatura (cm) e peso (kg).
- * Use ponto como separador decimal, por exemplo: 172.5 68.2
+/* OpenMP sobre a mesma base otimizada do sequencial.
+ * Compilar: make paralelizado
+ * Executar: OMP_NUM_THREADS=4 ./paralelizado ../dados_exemplo.txt --sem-tabela
  */
-
- /*
- 
- Explicações prévias:
-
- Devido o uso de 1000 valores de estatura e peso foi decidido o uso
- do tipo long double para evitar problemas de precisão.
- */
-
-#include <time.h>
-#include <cmath>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <map>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
+#include "calculo_sequencial.hpp"
 #include <omp.h>
-#include <utility>
-#include <algorithm>
 
-// Quantidade exigida pelo enunciado.
-// Relogio monotonicamente crescente, em segundos.
-static double agora() {
-    timespec t{};
-    if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) {
-        throw std::runtime_error("Nao foi possivel consultar o relogio.");
-    }
-    return t.tv_sec + t.tv_nsec * 1e-9;
-}
+Resultado calcular_paralelo(const std::vector<Pessoa>& pessoas) {
+    Resultado r = preparar(pessoas);
+    Estatisticas& e = r.estaturas;
+    Estatisticas& p = r.pesos;
+    const std::size_t ne = e.classes.size(), np = p.classes.size();
+    const double n = static_cast<double>(pessoas.size());
+    const int limite = std::max(1, std::min(omp_get_max_threads(),
+                                           static_cast<int>(pessoas.size())));
 
-constexpr std::size_t TOTAL_PESSOAS = 1000;
+    // Vetores separados por thread: nenhuma disputa na contagem.
+    // Aloca antes da equipe para propagar normalmente erros de memoria.
+    std::vector<std::vector<std::size_t>> locais_e(limite, std::vector<std::size_t>(ne, 0));
+    std::vector<std::vector<std::size_t>> locais_p(limite, std::vector<std::size_t>(np, 0));
+    double soma_e = 0, soma_p = 0, desvios_e = 0, desvios_p = 0;
 
-struct Pessoa {
-    long double estatura;
-    long double peso;
-};
+    // A mesma equipe executa todas as etapas, para as duas variaveis.
+    #pragma omp parallel num_threads(limite)
+    {
+        const int id = omp_get_thread_num();
+        #pragma omp single nowait
+        r.threads_usadas = omp_get_num_threads();
 
-struct Estatisticas {
-    // Numero da classe -> quantidade de pessoas.
-    std::map<long double, std::size_t> frequencias;
-    int threads_frequencias = 0;
-    int threads_media = 0;
-    int threads_desvio = 0;
-    long double largura;
-    long double media;
-    long double desvio_padrao;
-    long double coeficiente_variacao;
-};
-
-// Leitura e validacao das 1000 pessoas.
-std::vector<Pessoa> ler_dados(const std::string& caminho) {
-    std::ifstream arquivo(caminho);
-
-    if (!arquivo) {
-        throw std::runtime_error("Nao foi possivel abrir: " + caminho);
-    }
-
-    std::vector<Pessoa> pessoas;
-
-    pessoas.reserve(TOTAL_PESSOAS);
-
-    std::string linha;
-
-    std::size_t numero_linha = 0;
-
-    while (std::getline(arquivo, linha)) {
-        ++numero_linha;
-
-        std::istringstream entrada(linha);
-
-        Pessoa pessoa{};
-
-        std::string extra;
-
-        // Cada linha deve conter apenas estatura e peso positivos.
-        if (!(entrada >> pessoa.estatura >> pessoa.peso) || (entrada >> extra) ||
-            !std::isfinite(pessoa.estatura) || !std::isfinite(pessoa.peso) ||
-            pessoa.estatura <= 0 || pessoa.peso <= 0) {
-            throw std::runtime_error("Linha " + std::to_string(numero_linha) +
-                                     ": informe dois numeros positivos e finitos.");
+        #pragma omp for schedule(static)
+        for (std::size_t i = 0; i < pessoas.size(); ++i) {
+            ++locais_e[id][indice(e, pessoas[i].estatura)];
+            ++locais_p[id][indice(p, pessoas[i].peso)];
         }
 
-        if (pessoas.size() == TOTAL_PESSOAS) {
-            throw std::runtime_error("O arquivo possui mais de 1000 pessoas.");
+        // Cada classe tem um unico escritor; reduction combina as somas privadas.
+        // nowait permite adiantar o peso sem esperar todas as classes de estatura.
+        #pragma omp for reduction(+:soma_e) schedule(static) nowait
+        for (std::size_t j = 0; j < ne; ++j) {
+            std::size_t frequencia = 0;
+            for (int t = 0; t < r.threads_usadas; ++t) frequencia += locais_e[t][j];
+            e.classes[j].frequencia = frequencia;
+            soma_e += ponto_medio(e, j) * frequencia;
+        }
+        #pragma omp for reduction(+:soma_p) schedule(static)
+        for (std::size_t j = 0; j < np; ++j) {
+            std::size_t frequencia = 0;
+            for (int t = 0; t < r.threads_usadas; ++t) frequencia += locais_p[t][j];
+            p.classes[j].frequencia = frequencia;
+            soma_p += ponto_medio(p, j) * frequencia;
         }
 
-        pessoas.push_back(pessoa);
-    }
-
-    if (arquivo.bad()) {
-        throw std::runtime_error("Falha durante a leitura do arquivo.");
-    }
-
-    if (pessoas.size() != TOTAL_PESSOAS) {
-        throw std::runtime_error("Esperadas 1000 pessoas; recebidas " +
-                                 std::to_string(pessoas.size()) + ".");
-    }
-
-    return pessoas;
-}
-
-// Vetores privados evitam disputar um contador a cada pessoa.
-Estatisticas calcular(const std::vector<Pessoa>& pessoas,
-                     long double Pessoa::*variavel, long double largura,
-                     bool forcar_paralelo) {
-    Estatisticas resultado{};
-    resultado.largura = largura;
-    resultado.threads_frequencias = 1;
-    resultado.threads_media = 1;
-    resultado.threads_desvio = 1;
-
-    // Calcula a classe uma unica vez por pessoa e identifica a faixa ocupada.
-    std::vector<long double> classes(pessoas.size());
-    long double menor = std::floor((pessoas.front().*variavel) / largura);
-    long double maior = menor;
-    for (std::size_t i = 0; i < pessoas.size(); ++i) {
-        classes[i] = std::floor((pessoas[i].*variavel) / largura);
-        menor = std::min(menor, classes[i]);
-        maior = std::max(maior, classes[i]);
-    }
-
-    const long double faixa = maior - menor + 1;
-    // Evita alocacao excessiva para dados muito esparsos ou extremos.
-    if (!std::isfinite(faixa) || faixa > 65536) {
-        for (long double classe : classes) {
-            ++resultado.frequencias[classe];
-        }
-    } else {
-        const std::size_t quantidade = static_cast<std::size_t>(faixa);
-        std::vector<std::size_t> frequencias(quantidade, 0);
-
-        // Para 1000 pessoas, iniciar equipes costuma custar mais que contar.
-        const bool usar_paralelo = forcar_paralelo || pessoas.size() >= 10000;
-        if (usar_paralelo) {
-            const int limite = std::max(1, std::min(
-                omp_get_max_threads(), static_cast<int>(pessoas.size())));
-            // Cada vetor possui sua propria alocacao, sem contadores compartilhados.
-            std::vector<std::vector<std::size_t>> locais(
-                limite, std::vector<std::size_t>(quantidade, 0));
-
-            // Uma unica equipe por variavel, em vez de tres equipes.
-            #pragma omp parallel num_threads(limite)
-            {
-                const int id = omp_get_thread_num();
-                #pragma omp single nowait
-                resultado.threads_frequencias = omp_get_num_threads();
-
-                #pragma omp for schedule(static)
-                for (std::size_t i = 0; i < classes.size(); ++i) {
-                    const std::size_t indice = static_cast<std::size_t>(classes[i] - menor);
-                    ++locais[id][indice];
-                }
-            }
-
-            // Poucas classes: combinar sequencialmente evita novas barreiras.
-            for (int id = 0; id < resultado.threads_frequencias; ++id) {
-                for (std::size_t j = 0; j < quantidade; ++j) {
-                    frequencias[j] += locais[id][j];
-                }
-            }
-        } else {
-            for (long double classe : classes) {
-                ++frequencias[static_cast<std::size_t>(classe - menor)];
-            }
+        // As reducoes terminaram; uma thread publica as medias para toda a equipe.
+        #pragma omp single
+        {
+            e.media = soma_e / n;
+            p.media = soma_p / n;
         }
 
-        // Mantem o formato de saida anterior, sem usar mapa no laco principal.
-        for (std::size_t j = 0; j < quantidade; ++j) {
-            if (frequencias[j] != 0) {
-                resultado.frequencias[menor + j] = frequencias[j];
-            }
+        #pragma omp for reduction(+:desvios_e) schedule(static) nowait
+        for (std::size_t j = 0; j < ne; ++j) {
+            const double diferenca = ponto_medio(e, j) - e.media;
+            desvios_e += e.classes[j].frequencia * diferenca * diferenca;
+        }
+        #pragma omp for reduction(+:desvios_p) schedule(static)
+        for (std::size_t j = 0; j < np; ++j) {
+            const double diferenca = ponto_medio(p, j) - p.media;
+            desvios_p += p.classes[j].frequencia * diferenca * diferenca;
         }
     }
-
-    // Ha poucas classes: as duas somas sao mais baratas sem equipes adicionais.
-    const long double n = static_cast<long double>(pessoas.size());
-    long double soma_ponderada = 0;
-    for (const auto& classe : resultado.frequencias) {
-        const long double ponto_medio = (classe.first + 0.5L) * largura;
-        soma_ponderada += ponto_medio * classe.second;
-    }
-    resultado.media = soma_ponderada / n;
-
-    // Mantem duas passagens para evitar cancelamento numerico na variancia.
-    long double soma_desvios_quadrados = 0;
-    for (const auto& classe : resultado.frequencias) {
-        const long double ponto_medio = (classe.first + 0.5L) * largura;
-        const long double diferenca = ponto_medio - resultado.media;
-        soma_desvios_quadrados += classe.second * diferenca * diferenca;
-    }
-    resultado.desvio_padrao = std::sqrt(soma_desvios_quadrados / n);
-    resultado.coeficiente_variacao = resultado.desvio_padrao / resultado.media * 100;
-    if (!std::isfinite(resultado.media) || !std::isfinite(resultado.desvio_padrao) ||
-        !std::isfinite(resultado.coeficiente_variacao)) {
-        throw std::runtime_error("Valores grandes demais para calcular as estatisticas.");
-    }
-    return resultado;
-}
-
-// Diagnostico fora do tempo dos calculos; nao cria uma equipe adicional.
-void mostrar_ids(const char* variavel, int threads) {
-    for (int id = 0; id < threads; ++id) {
-        std::cout << "Thread participante (" << variavel << "): " << id << '\n';
-    }
-}
-
-// Imprime os resultados de forma organizada.
-
-void mostrar(const std::string& nome, // Nome da variavel
-             const std::string& unidade, // Unidade de medida da variavel
-             const Estatisticas& resultado // Resultado do calculo das estatisticas
-            ) {
-
-    // Imprime o nome da variavel, a largura da classe e o cabecalho da tabela.
-
-    std::cout << "\n" << nome << " - classes de " << resultado.largura
-              << " " << unidade << "\n"
-              << "Intervalo [inferior, superior) | Ponto medio | Frequencia\n";
-    
-    // Equipes reais de cada etapa; podem variar com ajuste dinamico ativo.
-    std::cout << "Threads efetivamente usadas (frequencias/media/desvio): "
-              << resultado.threads_frequencias << "/" << resultado.threads_media
-              << "/" << resultado.threads_desvio << '\n';
-
-    // Itera sobre cada classe e sua frequencia, imprimindo os resultados.
-
-    for (const auto& classe : resultado.frequencias) {
-
-        /* 
-            Essas três linhas calculam o início, o fim 
-            e o centro do intervalo de uma classe.
-        */
-
-        const long double inferior = classe.first * resultado.largura;
-        const long double superior = (classe.first + 1) * resultado.largura;
-        const long double ponto_medio = (classe.first + 0.5L) * resultado.largura;
-        std::cout << "[" << inferior << ", " << superior << ") | "
-                  << ponto_medio << " | " << classe.second << '\n';
-    }
-    std::cout << "Media agrupada: " << resultado.media << " " << unidade << '\n'
-              << "Desvio padrao populacional: " << resultado.desvio_padrao
-              << " " << unidade << '\n'
-              << "Coeficiente de variacao: " << resultado.coeficiente_variacao
-              << "%\n";
+    finalizar(e, desvios_e, n);
+    finalizar(p, desvios_p, n);
+    return r;
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Uso: " << argv[0]
-                  << " dados.txt [--mostrar-threads] [--forcar-paralelo]\n";
+                  << " dados.txt [--sem-tabela] [--mostrar-threads] [--automatico]\n";
         return 1;
     }
-    bool mostrar_threads = false;
-    bool forcar_paralelo = false;
+    bool mostrar_tabela = true, mostrar_threads = false, automatico = false;
     for (int i = 2; i < argc; ++i) {
         const std::string opcao = argv[i];
-        if (opcao == "--mostrar-threads") mostrar_threads = true;
-        else if (opcao == "--forcar-paralelo") forcar_paralelo = true;
+        if (opcao == "--sem-tabela") mostrar_tabela = false;
+        else if (opcao == "--mostrar-threads") mostrar_threads = true;
+        else if (opcao == "--automatico") automatico = true;
+        else if (opcao == "--forcar-paralelo") automatico = false;
         else {
             std::cerr << "Opcao desconhecida: " << opcao << '\n';
             return 1;
         }
     }
-    // Recursos disponiveis e configuracao do ambiente OpenMP.
-    const int processadores = omp_get_num_procs();
-    const int max_threads = omp_get_max_threads();
-    std::cout << "Processadores logicos disponiveis: " << processadores << '\n'
-              << "Maximo de threads configurado: " << max_threads << '\n'
-              << "Ajuste dinamico de threads: " << (omp_get_dynamic() ? "ativo" : "inativo") << '\n';
-    std::cout << "Modo: " << (forcar_paralelo ? "paralelo solicitado" : "automatico; paralelo a partir de 10000 pessoas") << '\n';
-
     try {
+        std::cout << "Processadores logicos disponiveis: " << omp_get_num_procs() << '\n'
+                  << "Maximo de threads configurado: " << omp_get_max_threads() << '\n'
+                  << "Ajuste dinamico de threads: " << (omp_get_dynamic() ? "ativo" : "inativo") << '\n';
         const double inicio_total = agora();
         const std::vector<Pessoa> pessoas = ler_dados(argv[1]);
         const double fim_leitura = agora();
-
-        // Mede agrupamento e calculos, sem leitura nem impressao.
+        const bool usar_paralelo = !automatico || pessoas.size() >= 10000;
         const double inicio = agora();
-        const Estatisticas estaturas = calcular(pessoas, &Pessoa::estatura, 8, forcar_paralelo);
-        const Estatisticas pesos = calcular(pessoas, &Pessoa::peso, 4, forcar_paralelo);
+        const Resultado r = usar_paralelo ? calcular_paralelo(pessoas) : calcular_sequencial(pessoas);
         const double fim = agora();
 
-        if (mostrar_threads) {
-            mostrar_ids("estatura", estaturas.threads_frequencias);
-            mostrar_ids("peso", pesos.threads_frequencias);
-        }
-
         std::cout << std::fixed << std::setprecision(2)
-                  << "Analise paralelizada de " << pessoas.size() << " pessoas\n"
-                  << "Calculos baseados nos pontos medios das classes.\n";
-        mostrar("Estatura", "cm", estaturas);
-        mostrar("Peso", "kg", pesos);
-
-        // Inclui a escrita dos resultados; exclui a impressao das metricas abaixo.
+                  << "Analise " << (usar_paralelo ? "paralela" : "automatica sequencial")
+                  << " de " << pessoas.size() << " pessoas\n"
+                  << "Threads efetivamente usadas (frequencias/media/desvio): "
+                  << r.threads_usadas << '/' << r.threads_usadas << '/' << r.threads_usadas << '\n';
+        if (mostrar_threads) {
+            for (int id = 0; id < r.threads_usadas; ++id) {
+                std::cout << "Thread participante: " << id << '\n';
+            }
+        }
+        mostrar("Estatura", "cm", r.estaturas, mostrar_tabela);
+        mostrar("Peso", "kg", r.pesos, mostrar_tabela);
         std::cout.flush();
         const double fim_total = agora();
-
         std::cout << std::setprecision(6)
                   << "\nTempo de leitura (s): " << fim_leitura - inicio_total << '\n'
                   << "Tempo dos calculos (s): " << fim - inicio << '\n'

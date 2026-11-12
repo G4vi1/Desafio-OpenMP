@@ -1,41 +1,47 @@
 CXX = g++
-CXXFLAGS = -std=c++14 -O2 -Wall -Wextra -pedantic
-
-FONTE = sequencial.cpp
-PROGRAMA = sequencial
+CXXFLAGS = -std=c++14 -O3 -Wall -Wextra -pedantic
 DADOS ?= ../dados_exemplo.txt
 THREADS ?= 4
 MOSTRAR_THREADS ?= 0
-FORCAR_PARALELO ?= 0
+FORCAR_PARALELO ?= 1
+TABELA ?= 1
+REPETICOES ?= 30
+MAX_THREADS ?=
+OPCAO_MAX = $(if $(MAX_THREADS),--max-threads "$(MAX_THREADS)",)
 
-# MOSTRAR_THREADS=1 ativa a impressao ordenada dos IDs.
-OPCAO_THREADS = $(if $(filter 1,$(MOSTRAR_THREADS)),--mostrar-threads,) $(if $(filter 1,$(FORCAR_PARALELO)),--forcar-paralelo,)
+OPCAO_TABELA = $(if $(filter 0,$(TABELA)),--sem-tabela,)
+OPCOES_OMP = $(if $(filter 1,$(MOSTRAR_THREADS)),--mostrar-threads,) $(if $(filter 0,$(FORCAR_PARALELO)),--automatico,)
+CABECALHOS = comum.hpp calculo_sequencial.hpp
 
-.PHONY: all run clean
+.PHONY: paralelizado all run run-sequencial run-paralelizado comparar clean validar-opcoes
+all: sequencial paralelizado
 
-all: $(PROGRAMA) paralelizado
-
-$(PROGRAMA): $(FONTE)
+sequencial: sequencial.cpp $(CABECALHOS)
 	$(CXX) $(CXXFLAGS) "$<" -o "$@"
 
-run: $(PROGRAMA)
-	@test -f "$(DADOS)" || { echo "Arquivo de dados nao encontrado: $(DADOS)"; exit 1; }
-	./$(PROGRAMA) "$(DADOS)"
+# O codigo-fonte permanece aqui; o executavel fica em resultados/.
+paralelizado: ../resultados/paralelizado
 
-clean:
-	$(RM) $(PROGRAMA) paralelizado
-
-# Compila a versao paralela com suporte a OpenMP.
-paralelizado: paralelizado.cpp
+../resultados/paralelizado: paralelizado.cpp $(CABECALHOS)
+	mkdir -p ../resultados
 	$(CXX) $(CXXFLAGS) -fopenmp "$<" -o "$@"
 
-.PHONY: run-paralelizado
-run-paralelizado: paralelizado
+validar-opcoes:
 	@test -f "$(DADOS)" || { echo "Arquivo de dados nao encontrado: $(DADOS)"; exit 1; }
 	@case "$(THREADS)" in ''|*[!0-9]*|0) echo "THREADS deve ser um inteiro positivo."; exit 1;; esac
-	@test "$(MOSTRAR_THREADS)" = 0 -o "$(MOSTRAR_THREADS)" = 1 || { echo "MOSTRAR_THREADS deve ser 0 ou 1."; exit 1; }
-	OMP_NUM_THREADS=$(THREADS) OMP_DYNAMIC=FALSE ./paralelizado "$(DADOS)" $(OPCAO_THREADS)
+	@case "$(TABELA):$(MOSTRAR_THREADS):$(FORCAR_PARALELO)" in [01]:[01]:[01]) ;; *) echo "TABELA, MOSTRAR_THREADS e FORCAR_PARALELO devem ser 0 ou 1."; exit 1;; esac
 
-# Atalho explicito para a execucao sequencial.
-.PHONY: run-sequencial
-run-sequencial: run
+run: run-sequencial
+
+run-sequencial: sequencial validar-opcoes
+	./sequencial "$(DADOS)" $(OPCAO_TABELA)
+
+run-paralelizado: paralelizado validar-opcoes
+	OMP_NUM_THREADS=$(THREADS) OMP_DYNAMIC=FALSE ../resultados/paralelizado "$(DADOS)" $(OPCAO_TABELA) $(OPCOES_OMP)
+
+# Compara de verdade: OpenMP ativo, mesmos dados, mesma saida e sem tabelas.
+comparar: all validar-opcoes
+	python3 ../scripts/comparar.py "$(DADOS)" --repeticoes "$(REPETICOES)" $(OPCAO_MAX)
+
+clean:
+	$(RM) sequencial ../resultados/paralelizado

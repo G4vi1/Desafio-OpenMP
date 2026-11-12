@@ -17,7 +17,7 @@ if [[ ! -f "$ARQUIVO_DADOS" ]]; then
 fi
 
 # Compila antes de executar.
-make -C "$PASTA_PROJETO/codigos"
+make -C "$PASTA_PROJETO/codigos" sequencial
 mkdir -p "$PASTA_PROJETO/resultados"
 
 # Cria uma saida exclusiva por execucao e exibe tambem no terminal.

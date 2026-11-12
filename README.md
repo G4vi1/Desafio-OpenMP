@@ -1,49 +1,35 @@
-# Desafio OpenMP — versão sequencial
+# Desafio OpenMP — sequencial otimizado e paralelo
 
-Programa em C++ que lê estatura e peso de 1.000 pessoas e calcula as frequências por classe, a média agrupada, o desvio padrão populacional e o coeficiente de variação (CV).
+Calcula média agrupada, desvio padrão populacional e coeficiente de variação
+(CV) de estaturas e pesos de exatamente 1.000 pessoas. As duas versões usam
+`double`, os mesmos dados, as mesmas regras de classe e a mesma leitura validada.
 
-Esta versão é sequencial, sem diretivas OpenMP. As estaturas são agrupadas em intervalos de 8 cm e os pesos em intervalos de 4 kg. Os cálculos usam os pontos médios das classes.
+## Teste rápido
 
-## 1. Preparar o ambiente
-
-Para executar diretamente no Linux, tenha Bash, `g++` e `make` disponíveis. Confira:
-
-```bash
-g++ --version
-make --version
-```
-
-Entre na pasta principal do projeto:
+Na pasta principal do projeto:
 
 ```bash
 cd ~/Downloads/Desafio-OpenMP
+make -C codigos
+make -C codigos run-sequencial
+make -C codigos run-paralelizado THREADS=4
 ```
 
-Se o projeto estiver em outro local, ajuste esse caminho. Os blocos abaixo indicam de qual pasta devem ser executados.
-
-## 2. Teste rápido com os dados de exemplo
-
-Na pasta principal:
+O padrão é `dados_exemplo.txt`, com 1.000 registros **fictícios**. O comando
+`run-paralelizado` agora executa OpenMP de verdade por padrão. Para usar
+explicitamente o modo automático anterior, que seleciona o sequencial nesta
+entrada pequena:
 
 ```bash
-bash scripts/sequencial.sh
+make -C codigos run-paralelizado FORCAR_PARALELO=0
 ```
 
-O script compila o código, executa com `dados_exemplo.txt`, mostra os resultados no terminal e salva um `.txt` em `resultados/`.
+Se já estiver dentro de `codigos`, retire `-C codigos` dos comandos.
 
-O arquivo de exemplo contém **1.000 registros fictícios**. Ele serve para testar o programa, não representa uma coleta real.
+## Entrada de dados
 
-Se seu terminal já estiver dentro de `codigos`, use este comando no lugar do anterior:
-
-```bash
-bash ../scripts/sequencial.sh
-```
-
-Não é necessário executar os dois blocos: são alternativas conforme sua pasta atual.
-
-## 3. Testar com seus próprios dados
-
-Crie `dados.txt` na pasta principal. Cada linha deve conter a estatura em centímetros e o peso em quilogramas, separados por espaço:
+Cada linha deve conter estatura em cm e peso em kg, separados por espaço ou
+TAB. Use ponto decimal, sem cabeçalho ou colunas extras. Por exemplo:
 
 ```text
 170.50 68.20
@@ -51,167 +37,235 @@ Crie `dados.txt` na pasta principal. Cada linha deve conter a estatura em centí
 159.30 55.00
 ```
 
-Essas três linhas ilustram o formato. O arquivo completo precisa ter **exatamente 1.000 linhas**, sem cabeçalho, linhas vazias ou colunas extras. Use ponto como separador decimal. Os valores devem ser positivos e finitos.
+Essas linhas apenas ilustram o formato: o arquivo completo precisa de 1.000
+registros positivos e finitos. Linhas inválidas, vazias, quantidade incorreta
+e dados extras são rejeitados.
 
-Confira a quantidade de registros:
-
-```bash
-awk 'END { print NR }' dados.txt
-```
-
-Na pasta principal, execute:
+Para seus próprios dados, coloque `dados.txt` na pasta principal e execute:
 
 ```bash
-bash scripts/sequencial.sh dados.txt
+make -C codigos run-sequencial DADOS=../dados.txt
+make -C codigos run-paralelizado THREADS=4 DADOS=../dados.txt
 ```
 
-Se estiver em `codigos`, execute:
+`DADOS` é interpretado a partir de `codigos` nos comandos do Makefile.
+
+## Métricas sem imprimir as tabelas
 
 ```bash
-bash ../scripts/sequencial.sh ../dados.txt
+make -C codigos run-sequencial TABELA=0
+make -C codigos run-paralelizado THREADS=4 TABELA=0
 ```
 
-Quando você informa um caminho, ele é interpretado a partir da pasta atual do terminal. Sem argumento, o script localiza automaticamente o `dados_exemplo.txt` da pasta principal.
-
-## 4. Compilar e executar pelo Makefile
-
-Entre em `codigos` a partir da pasta principal:
+`TABELA=0` oculta os intervalos, mas mantém médias, desvios, CVs e tempos.
+Para mostrar também os IDs participantes da equipe:
 
 ```bash
-cd codigos
-make
-make run DADOS=../dados_exemplo.txt
+make -C codigos run-paralelizado THREADS=4 MOSTRAR_THREADS=1
 ```
 
-Para usar seus dados:
+Os IDs são listados após os cálculos, fora da medição dessa etapa. As métricas
+OpenMP informam processadores lógicos, máximo configurado, ajuste dinâmico e
+tamanho real da equipe. O Makefile desativa o ajuste dinâmico nas execuções.
+
+## Script da versão paralela e TXT
+
+Na pasta principal:
 
 ```bash
-make run DADOS=../dados.txt
+# Dados de exemplo, 4 threads:
+bash scripts/paralelizado.sh
+
+# Dados de exemplo, 8 threads:
+bash scripts/paralelizado.sh dados_exemplo.txt 8
+
+# Dados proprios, 4 threads:
+bash scripts/paralelizado.sh dados.txt 4
+
+# Sem tabela, com IDs participantes:
+TABELA=0 MOSTRAR_THREADS=1 bash scripts/paralelizado.sh dados_exemplo.txt 4
 ```
 
-O Makefile compila e executa, mas não salva automaticamente um relatório. Para gerar o `.txt`, use o script da seção 2 ou 3.
-
-Para remover o executável e recompilar:
+Na pasta `codigos`, use:
 
 ```bash
-make clean
-make
+bash ../scripts/paralelizado.sh ../dados_exemplo.txt 4
 ```
 
-Os arquivos de dados e os relatórios são preservados por `make clean`.
+O primeiro argumento é o arquivo e o segundo é a quantidade de threads. Sem
+argumentos usa o exemplo e 4 threads (ou `OMP_NUM_THREADS`, se estiver definida).
+O caminho dos dados é relativo à pasta atual. O script compila, executa OpenMP
+com ajuste dinâmico desativado, mostra a saída e salva um TXT exclusivo com
+nome `resultados/paralelizado_4threads_DATA_HORA_IDENTIFICADOR.txt`.
 
-## 5. Onde consultar os resultados
-
-Cada execução bem-sucedida do script gera um arquivo com nome semelhante a:
-
-```text
-resultados/sequencial_20261112_160850_E3YyZO.txt
-```
-
-O nome inclui data, hora e um identificador para não sobrescrever execuções anteriores. Ao terminar, o script informa o caminho completo do relatório.
-
-Na pasta principal, liste os relatórios do mais recente para o mais antigo:
+O **executável** agora fica em `resultados/paralelizado`. O código-fonte continua
+em `codigos/paralelizado.cpp`, acompanhado pelo Git. Por exemplo, na pasta
+principal, uma execução direta é:
 
 ```bash
-ls -lt resultados/*.txt
+OMP_NUM_THREADS=4 OMP_DYNAMIC=FALSE ./resultados/paralelizado dados_exemplo.txt
 ```
 
-Abra o arquivo desejado no VS Code ou leia pelo terminal, substituindo o nome abaixo pelo que foi gerado:
+## Comparação repetida até o máximo disponível
+
+Na pasta principal:
 
 ```bash
-cat resultados/NOME_DO_ARQUIVO.txt
+make -C codigos comparar REPETICOES=40
 ```
 
-O relatório contém:
+Ou chame o Python diretamente (ele também compila antes dos testes):
 
-- Intervalos, pontos médios e frequências das classes ocupadas.
-- Média agrupada e desvio padrão populacional de estatura e peso.
-- Coeficiente de variação em porcentagem.
-- Tempo de leitura, tempo dos cálculos e tempo total em segundos.
-
-Os valores estatísticos usam duas casas decimais; os tempos usam seis. O tempo dos cálculos inclui agrupamento e estatísticas, sem leitura nem impressão. O total inclui leitura e impressão dos resultados, mas exclui compilação, inicialização do processo e impressão das próprias métricas. Os tempos variam entre execuções.
-
-Para o `dados_exemplo.txt` fornecido, os resultados esperados são:
-
-| Variável | Média | Desvio padrão populacional | CV |
-|---|---:|---:|---:|
-| Estatura | 172.68 cm | 15.64 cm | 9.06% |
-| Peso | 82.86 kg | 21.40 kg | 25.83% |
-
-## 6. Organização do projeto
-
-```text
-Desafio-OpenMP/
-├── .gitignore
-├── Dockerfile
-├── README.md
-├── dados_exemplo.txt
-├── codigos/
-│   ├── Makefile
-│   └── sequencial.cpp
-├── scripts/
-│   └── sequencial.sh
-└── resultados/             # Relatórios gerados pelo script
+```bash
+python3 scripts/comparar.py --repeticoes 40
+python3 scripts/comparar.py dados.txt --repeticoes 40
 ```
-
-O executável é gerado em `codigos/sequencial`. O `.gitignore` exclui os executáveis e o conteúdo de `resultados/` do versionamento.
-
-## 7. Problemas comuns
-
-**“Nenhum arquivo make encontrado”**: execute `make` dentro de `codigos`. Na pasta principal, use `make -C codigos` ou o script.
-
-**“Nada a ser feito para all”**: o executável está atualizado. Execute `make run DADOS=../dados_exemplo.txt` dentro de `codigos` para rodar.
-
-**“Arquivo de dados nao encontrado”**: confira o nome e o caminho do arquivo. `../dados.txt` significa um arquivo na pasta acima da atual. O projeto fornece `dados_exemplo.txt`; `dados.txt` precisa ser criado por você.
-
-**“Esperadas 1000 pessoas” ou erro de linha**: confira a quantidade e o formato dos registros conforme a seção 3.
-
-**“Permission denied” ao chamar o script diretamente**: use `bash scripts/sequencial.sh` na pasta principal ou dê permissão com `chmod +x scripts/sequencial.sh`.
-
-
-## Versão otimizada: execução automática ou paralela
 
 Na pasta `codigos`:
 
 ```bash
-make
-make run-paralelizado THREADS=4
+make comparar REPETICOES=40
 ```
 
-O modo automático usa contagem sequencial para menos de 10.000 pessoas. O leitor
-atual exige 1.000 registros, portanto essa entrada usa uma thread. O limite é uma
-heurística, não uma garantia universal de desempenho.
+Requer Python 3. Compara o sequencial com OpenMP em **1, 2, 4, 8, 16, 32…**
+threads até o máximo disponível. Nesta máquina, com 16 processadores lógicos,
+a sequência é **sequencial, paralelo 1, 2, 4, 8 e 16 threads**. Se o máximo não
+for potência de dois, ele também entra: para 12, testa 1, 2, 4, 8 e 12.
 
-Para testar explicitamente a contagem com OpenMP:
+O máximo considera a afinidade de CPU do processo (ou a contagem de CPUs do
+sistema quando a afinidade não está disponível) e `OMP_THREAD_LIMIT`, se
+definido. É um teto de recursos lógicos, não uma promessa de ganho de velocidade.
+Cada execução confere a quantidade real de threads usada nas três etapas.
+
+Para limitar os testes abaixo do máximo:
 
 ```bash
-make run-paralelizado THREADS=4 FORCAR_PARALELO=1
+make -C codigos comparar REPETICOES=40 MAX_THREADS=8
+python3 scripts/comparar.py --repeticoes 40 --max-threads 8
 ```
 
-Para listar os IDs participantes:
+`THREADS=4` continua controlando uma execução individual pelo Makefile;
+`MAX_THREADS=8` limita a sequência da comparação. São parâmetros diferentes.
+
+A comparação realiza cada configuração 40 vezes, embaralha a ordem e mantém
+tabelas e IDs desativados. Confere as seis estatísticas exibidas contra uma
+execução sequencial de referência e interrompe se elas divergirem. O paralelo
+sempre usa OpenMP de verdade, sem o modo automático sequencial.
+
+Em `resultados/`, salva arquivos exclusivos:
+
+- `comparacao_*.csv`: tempos de leitura, cálculos e total de cada execução,
+  versão, threads solicitadas e efetivamente usadas.
+- `comparacao_*.txt`: medianas em segundos, speedup e eficiência.
+
+**Speedup = tempo sequencial / tempo paralelo.** Acima de 1 indica ganho;
+abaixo de 1 indica perda. **Eficiência = speedup / threads × 100%.** Os tempos
+são apresentados com seis casas decimais; um cálculo arredondado para zero
+produz `N/D` no speedup, evitando divisão por zero.
+
+São processos novos: o tempo paralelo inclui a primeira criação da equipe.
+O script não mede apenas uma equipe já aquecida. Com apenas 1.000 pessoas,
+o custo do OpenMP pode superar o ganho, mesmo usando mais threads. Compare as
+medianas dos cálculos; não atribua diferenças isoladas da leitura ao OpenMP.
+
+## O que foi otimizado
+
+### Base sequencial
+
+- Converte as linhas diretamente com `strtod`, evitando criar um
+  `istringstream` por pessoa, mantendo as validações.
+- Conta estatura e peso na mesma passagem.
+- Usa vetores contíguos em vez de atualizações de `std::map`.
+- Não cria um vetor temporário com a classe de cada pessoa.
+- Usa uma passagem conjunta para encontrar os limites das duas variáveis.
+- Compila com `-O3`, sem `-ffast-math`.
+
+As classes começam em múltiplos de 8 cm e 4 kg e seguem `[inferior, superior)`.
+Por exemplo, 170 cm pertence a `[168, 176)`, cujo ponto médio é 172 cm. Classes
+vazias não são impressas. Faixas muito esparsas usam apenas os intervalos
+ocupados, evitando alocação proporcional à distância entre os extremos.
+
+### OpenMP
+
+Uma única equipe executa as etapas das **duas variáveis**:
+
+1. `omp for schedule(static)` distribui as pessoas e cada thread conta em
+   vetores privados, sem `critical` ou `atomic`.
+2. Dois `omp for` combinam as contagens por classe e fazem `reduction` das
+   somas ponderadas. Cada contador final tem um único escritor.
+3. `single` calcula as médias; a barreira implícita as disponibiliza à equipe.
+4. Dois `omp for reduction` somam os desvios quadrados.
+
+Os primeiros laços de estatura nas etapas 2 e 4 usam `nowait`, permitindo
+adiantar o trabalho de peso. As esperas posteriores garantem a conclusão das
+etapas antes de seus resultados serem usados. A preparação dos limites, a
+alocação, a leitura, as raízes quadradas finais e a impressão são sequenciais.
+
+O algoritmo mantém o cálculo em duas passagens (média e depois desvios) para
+evitar a perda de precisão da fórmula baseada na diferença entre somas grandes.
+As reduções podem mudar a ordem das adições em ponto flutuante, produzindo
+pequenas diferenças nas últimas casas.
+
+## Significado dos tempos
+
+Todos são medidos com `clock_gettime(CLOCK_MONOTONIC)`:
+
+- **Leitura:** abrir, ler, converter e validar a entrada.
+- **Cálculos:** preparação, alocação dos contadores, contagem, média e desvio.
+  No paralelo inclui criar a equipe, sincronizar e combinar resultados.
+- **Total:** leitura, cálculos e impressão dos resultados; exclui compilação,
+  inicialização do processo e impressão das próprias métricas. Na versão OpenMP,
+  a apresentação inicial do ambiente ocorre antes deste cronômetro.
+
+As estatísticas usam duas casas decimais. Tempos usam seis casas decimais, como na formatação original. Isso limita
+a apresentação a microssegundos; não representa a resolução real do relógio.
+
+## Gerar um TXT da versão sequencial
+
+Na pasta principal:
 
 ```bash
-make run-paralelizado THREADS=4 FORCAR_PARALELO=1 MOSTRAR_THREADS=1
+bash scripts/sequencial.sh
+# Ou, com dados próprios:
+bash scripts/sequencial.sh dados.txt
 ```
 
-A listagem é feita após os cálculos: não altera seu tempo medido, mas participa
-do tempo total. Cada variável usa no máximo uma equipe na contagem; cada thread
-possui seu próprio vetor de frequências. A combinação e os cálculos sobre as
-poucas classes são sequenciais. Assim, os campos de threads de média e desvio
-mostram 1. Para faixas extremamente esparsas, a contagem usa um mapa sequencial
-para limitar o consumo de memória, mesmo no modo paralelo solicitado.
+Se estiver em `codigos`, use `bash ../scripts/sequencial.sh`.
+O script mostra o resultado e salva um `.txt` exclusivo em `resultados/`.
+O caminho informado ao script é relativo à pasta atual do terminal.
 
-Comparação local com `dados_exemplo.txt`, quatro threads configuradas, IDs
-desativados e 40 processos novos por versão. Mediana do tempo dos cálculos:
+## Organização
 
-| Versão | Tempo |
-|---|---:|
-| Sequencial de referência | 65 µs |
-| Paralela anterior, com critical e seis equipes no total | 461 µs |
-| Otimizada, paralelo forçado | 137 µs |
-| Otimizada, automático (uma thread) | 47 µs |
+```text
+codigos/
+  comum.hpp                 # Estruturas, leitura, classes e impressão
+  calculo_sequencial.hpp    # Algoritmo sequencial usado como referência
+  sequencial.cpp            # Execução e métricas sequenciais
+  paralelizado.cpp          # Etapas OpenMP e métricas da equipe
+  Makefile
+scripts/
+  sequencial.sh             # Executar e salvar a saída sequencial
+  paralelizado.sh           # Executar OpenMP e salvar a saida
+  comparar.py               # Comparar ate o maximo e salvar tempos e medianas
+resultados/                 # Executavel paralelizado e relatorios; ignorados pelo Git
+dados_exemplo.txt
+```
 
-O ganho do modo automático vem da mudança do algoritmo de contagem e da redução
-do custo de coordenação, não de aceleração por várias threads. Nesta entrada,
-mesmo o paralelo otimizado continua mais lento que a referência sequencial.
-Os números variam entre máquinas e execuções e têm resolução de 1 µs na saída.
+O sequencial não depende de OpenMP. Compartilhar as rotinas comuns impede que
+mudanças na leitura ou nos intervalos tornem a comparação entre versões injusta.
+
+## Problemas comuns
+
+- **Sem regra para o alvo:** na pasta principal use `make -C codigos ...`.
+- **Nada a ser feito:** o executável está atualizado; use um alvo `run-...`.
+- **Dados não encontrados:** confira o caminho; o arquivo fornecido se chama
+  `dados_exemplo.txt`, não `dados.txt`.
+- **Erro de linha ou quantidade:** confira as regras de entrada acima.
+- **Reconstruir:** execute `make -C codigos clean` e `make -C codigos`.
+
+Os executáveis e `resultados/` estão no `.gitignore`. Limpar com `make clean`
+não remove dados de entrada nem relatórios.
+
+O `make` gera `codigos/sequencial` e `resultados/paralelizado`. O `make clean`
+remove apenas esses executáveis, preservando os relatórios TXT/CSV. Se você
+apagar toda a pasta `resultados`, o próximo `make` a recria antes de compilar.
