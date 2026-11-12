@@ -167,3 +167,51 @@ O executável é gerado em `codigos/sequencial`. O `.gitignore` exclui os execut
 **“Esperadas 1000 pessoas” ou erro de linha**: confira a quantidade e o formato dos registros conforme a seção 3.
 
 **“Permission denied” ao chamar o script diretamente**: use `bash scripts/sequencial.sh` na pasta principal ou dê permissão com `chmod +x scripts/sequencial.sh`.
+
+
+## Versão otimizada: execução automática ou paralela
+
+Na pasta `codigos`:
+
+```bash
+make
+make run-paralelizado THREADS=4
+```
+
+O modo automático usa contagem sequencial para menos de 10.000 pessoas. O leitor
+atual exige 1.000 registros, portanto essa entrada usa uma thread. O limite é uma
+heurística, não uma garantia universal de desempenho.
+
+Para testar explicitamente a contagem com OpenMP:
+
+```bash
+make run-paralelizado THREADS=4 FORCAR_PARALELO=1
+```
+
+Para listar os IDs participantes:
+
+```bash
+make run-paralelizado THREADS=4 FORCAR_PARALELO=1 MOSTRAR_THREADS=1
+```
+
+A listagem é feita após os cálculos: não altera seu tempo medido, mas participa
+do tempo total. Cada variável usa no máximo uma equipe na contagem; cada thread
+possui seu próprio vetor de frequências. A combinação e os cálculos sobre as
+poucas classes são sequenciais. Assim, os campos de threads de média e desvio
+mostram 1. Para faixas extremamente esparsas, a contagem usa um mapa sequencial
+para limitar o consumo de memória, mesmo no modo paralelo solicitado.
+
+Comparação local com `dados_exemplo.txt`, quatro threads configuradas, IDs
+desativados e 40 processos novos por versão. Mediana do tempo dos cálculos:
+
+| Versão | Tempo |
+|---|---:|
+| Sequencial de referência | 65 µs |
+| Paralela anterior, com critical e seis equipes no total | 461 µs |
+| Otimizada, paralelo forçado | 137 µs |
+| Otimizada, automático (uma thread) | 47 µs |
+
+O ganho do modo automático vem da mudança do algoritmo de contagem e da redução
+do custo de coordenação, não de aceleração por várias threads. Nesta entrada,
+mesmo o paralelo otimizado continua mais lento que a referência sequencial.
+Os números variam entre máquinas e execuções e têm resolução de 1 µs na saída.
