@@ -7,11 +7,13 @@
 
 
 int main(int argc, char* argv[]) {
+    // Exige o arquivo de entrada e aceita ocultar as tabelas de frequencia.
     if (argc < 2 || argc > 3 || (argc == 3 && std::string(argv[2]) != "--sem-tabela")) {
         std::cerr << "Uso: " << argv[0] << " dados.txt [--sem-tabela]\n";
         return 1;
     }
     try {
+        // A leitura inclui a validacao dos 1.000 pares de estatura e peso.
         const double inicio_total = agora();
         const std::vector<Pessoa> pessoas = ler_dados(argv[1]);
         const double fim_leitura = agora();
@@ -23,6 +25,7 @@ int main(int argc, char* argv[]) {
                   << "Analise sequencial de " << pessoas.size() << " pessoas\n";
         mostrar("Estatura", "cm", r.estaturas, argc == 2);
         mostrar("Peso", "kg", r.pesos, argc == 2);
+        // O tempo total inclui a saida dos resultados ate o flush do terminal.
         std::cout.flush();
         const double fim_total = agora();
         std::cout << std::setprecision(6)

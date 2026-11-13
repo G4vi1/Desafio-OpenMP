@@ -4,6 +4,7 @@
 #include "comum.hpp"
 
 inline Resultado calcular_sequencial(const std::vector<Pessoa>& pessoas) {
+    // Prepara classes de 8 cm para estatura e de 4 kg para peso.
     Resultado r = preparar(pessoas);
     Estatisticas& e = r.estaturas;
     Estatisticas& p = r.pesos;
@@ -14,6 +15,7 @@ inline Resultado calcular_sequencial(const std::vector<Pessoa>& pessoas) {
         ++p.classes[indice(p, pessoa.peso)].frequencia;
     }
 
+    // Cada ponto medio contribui com um peso igual a frequencia da classe.
     double soma_e = 0, soma_p = 0;
     for (std::size_t i = 0; i < e.classes.size(); ++i) {
         soma_e += ponto_medio(e, i) * e.classes[i].frequencia;
@@ -25,7 +27,8 @@ inline Resultado calcular_sequencial(const std::vector<Pessoa>& pessoas) {
     e.media = soma_e / n;
     p.media = soma_p / n;
 
-    // Duas passagens mantem a formula estavel, sem subtrair somas muito grandes.
+    // Com as medias prontas, soma os desvios quadraticos ponderados.
+    // Calcular os desvios diretamente evita subtrair somas muito grandes.
     double desvios_e = 0, desvios_p = 0;
     for (std::size_t i = 0; i < e.classes.size(); ++i) {
         const double diferenca = ponto_medio(e, i) - e.media;
@@ -35,6 +38,7 @@ inline Resultado calcular_sequencial(const std::vector<Pessoa>& pessoas) {
         const double diferenca = ponto_medio(p, i) - p.media;
         desvios_p += p.classes[i].frequencia * diferenca * diferenca;
     }
+    // Calcula o desvio padrao populacional e o CV de cada variavel.
     finalizar(e, desvios_e, n);
     finalizar(p, desvios_p, n);
     return r;

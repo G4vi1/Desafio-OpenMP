@@ -1,5 +1,6 @@
 # Saidas de testes e medicoes.
 /resultados/
+/output/
 
 # Executaveis e objetos de compilacao.
 /sequencial

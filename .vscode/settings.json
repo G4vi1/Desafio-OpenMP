@@ -1,0 +1,8 @@
+{
+    "files.exclude": {
+        "**/resultados/comparacao_*_fontes": true,
+        "**/resultados/comparacao_*_fontes/**": true,
+        "**/resultados/graficos/*/fontes": true,
+        "**/resultados/graficos/*/fontes/**": true
+    }
+}

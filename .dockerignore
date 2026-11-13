@@ -1,6 +1,7 @@
 .git
 .vscode
 resultados
+output
 codigos/sequencial
 codigos/paralelizado
 **/__pycache__
